@@ -156,6 +156,110 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ============================================
+// 🆕 ROTA ATALHO: CALCULAR (SEM AUTENTICAÇÃO)
+// Para compatibilidade com frontend atual
+// ============================================
+app.post('/calcular', async (req, res) => {
+    try {
+        const { respostas, dadosEmpresa } = req.body;
+
+        // Validação
+        if (!respostas || !dadosEmpresa) {
+            return res.status(400).json({ 
+                erro: 'Respostas e dados da empresa são obrigatórios' 
+            });
+        }
+
+        // ===== CÁLCULO DE PONTUAÇÃO (Lógica original) =====
+        
+        // Definir categorias
+        const categorias = {
+            'Tesouraria': { inicio: 0, fim: 9 },
+            'Resultados & DRE': { inicio: 10, fim: 19 },
+            'Fluxo de Caixa': { inicio: 20, fim: 35 },
+            'Orçamento': { inicio: 36, fim: 45 },
+            'Investimentos': { inicio: 46, fim: 55 },
+            'Riscos Financeiros': { inicio: 56, fim: 65 },
+            'Indicadores Financeiros': { inicio: 66, fim: 75 },
+            'Planejamento Tributário': { inicio: 76, fim: 79 }
+        };
+
+        // Calcular pontuação por categoria
+        const pontuacoesCategorias = {};
+        let pontuacaoTotal = 0;
+
+        for (const [categoria, range] of Object.entries(categorias)) {
+            let pontos = 0;
+            let questoesRespondidas = 0;
+
+            for (let i = range.inicio; i <= range.fim; i++) {
+                if (respostas[i] !== undefined) {
+                    pontos += respostas[i];
+                    questoesRespondidas++;
+                }
+            }
+
+            pontuacoesCategorias[categoria] = {
+                pontos: pontos,
+                questoes: questoesRespondidas,
+                media: questoesRespondidas > 0 ? (pontos / questoesRespondidas) * 10 : 0
+            };
+
+            pontuacaoTotal += pontos;
+        }
+
+        const totalQuestoes = Object.keys(respostas).length;
+        const pontuacaoMedia = totalQuestoes > 0 ? (pontuacaoTotal / totalQuestoes) * 10 : 0;
+
+        // Retornar resultado (SEM salvar no banco - sem autenticação)
+        res.json({
+            sucesso: true,
+            pontuacaoTotal: pontuacaoMedia.toFixed(1),
+            pontuacoesCategorias: pontuacoesCategorias,
+            mensagem: 'Diagnóstico calculado (modo sem login)'
+        });
+
+    } catch (error) {
+        console.error('Erro ao calcular diagnóstico:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao processar diagnóstico' 
+        });
+    }
+});
+
+// ============================================
+// 🆕 ROTA ATALHO: PERDAS (SEM AUTENTICAÇÃO)
+// Para compatibilidade com frontend atual
+// ============================================
+app.post('/perdas', async (req, res) => {
+    try {
+        const { pontuacaoTotal, faturamentoAnual } = req.body;
+
+        if (!pontuacaoTotal || !faturamentoAnual) {
+            return res.status(400).json({ 
+                erro: 'Pontuação e faturamento são obrigatórios' 
+            });
+        }
+
+        // Cálculo de perdas (lógica original)
+        const percentualPerda = (100 - parseFloat(pontuacaoTotal)) / 100;
+        const perdaEstimada = parseFloat(faturamentoAnual) * percentualPerda * 0.15;
+
+        res.json({
+            sucesso: true,
+            perdaEstimada: perdaEstimada.toFixed(2),
+            percentualPerda: (percentualPerda * 100).toFixed(1)
+        });
+
+    } catch (error) {
+        console.error('Erro ao calcular perdas:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao calcular perdas' 
+        });
+    }
+});
+
+// ============================================
 // ROTA: CALCULAR DIAGNÓSTICO (COM AUTENTICAÇÃO)
 // ============================================
 app.post('/api/diagnostico/calcular', verificarAutenticacao, async (req, res) => {
@@ -370,5 +474,6 @@ app.listen(PORT, () => {
     console.log(`\n🚀 Backend Gestor 360° rodando na porta ${PORT}`);
     console.log(`🔗 URL: http://localhost:${PORT}`);
     console.log(`✅ Supabase conectado!`);
-    console.log(`🔐 Autenticação ativada!\n`);
+    console.log(`🔐 Autenticação ativada!`);
+    console.log(`🆕 Rotas de atalho disponíveis: /calcular, /perdas\n`);
 });
