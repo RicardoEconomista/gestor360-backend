@@ -1,15 +1,29 @@
 {
   "name": "gestor360-backend",
-  "version": "1.0.0",
-  "description": "Backend do Gestor 360 - Versão Simples",
+  "version": "2.0.0",
+  "description": "Backend do Sistema Gestor Financeiro 360° com Supabase",
   "main": "servidor.js",
   "scripts": {
-    "start": "node servidor.js"
+    "start": "node servidor.js",
+    "dev": "nodemon servidor.js"
   },
-  "author": "Vinicius",
+  "keywords": [
+    "gestor",
+    "financeiro",
+    "diagnostico",
+    "supabase"
+  ],
+  "author": "Ricardo Economista",
   "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

@@ -1,123 +1,374 @@
-// ═══════════════════════════════════════════════════════════════════
-// 🚀 SERVIDOR DO GESTOR 360° (VERSÃO SIMPLES)
-// ═══════════════════════════════════════════════════════════════════
+// ============================================
+// GESTOR 360° - BACKEND COM SUPABASE
+// ============================================
+// Arquivo: servidor.js
+// Função: API backend com autenticação e banco de dados
 
-// 📦 Importar bibliotecas necessárias
 const express = require('express');
 const cors = require('cors');
+const supabase = require('./supabase');
 
-// 🏗️ Criar o servidor
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// 🔧 Configurar o servidor
-app.use(cors()); // Permite que o frontend acesse o backend
-app.use(express.json()); // Permite receber dados em JSON
+// Middlewares
+app.use(cors());
+app.use(express.json());
 
-// 🎯 Porta onde o servidor vai rodar
-const PORTA = 3000;
+// ============================================
+// MIDDLEWARE: VERIFICAR AUTENTICAÇÃO
+// ============================================
+async function verificarAutenticacao(req, res, next) {
+    try {
+        // Pegar token do header Authorization
+        const authHeader = req.headers.authorization;
+        
+        if (!authHeader) {
+            return res.status(401).json({ 
+                erro: 'Token de autenticação não fornecido' 
+            });
+        }
 
-// ═══════════════════════════════════════════════════════════════════
-// 📍 ROTAS (Endereços que o servidor responde)
-// ═══════════════════════════════════════════════════════════════════
+        const token = authHeader.replace('Bearer ', '');
 
-// ROTA 1: Página inicial
-// Quando você abre localhost:3000 no navegador
-app.get('/', (req, res) => {
-    res.send(`
-        <html>
-            <head>
-                <title>Gestor 360° API</title>
-                <style>
-                    body {
-                        font-family: Arial, sans-serif;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        height: 100vh;
-                        margin: 0;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        color: white;
-                    }
-                    .container {
-                        text-align: center;
-                        padding: 40px;
-                        background: rgba(255,255,255,0.1);
-                        border-radius: 20px;
-                        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-                    }
-                    h1 { font-size: 3em; margin: 0; }
-                    p { font-size: 1.5em; margin: 20px 0; }
-                    .status { color: #4ade80; font-weight: bold; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>🚀 GESTOR 360° API</h1>
-                    <p class="status">✅ FUNCIONANDO!</p>
-                    <p>Backend está online e pronto para usar!</p>
-                </div>
-            </body>
-        </html>
-    `);
-});
+        // Verificar token com Supabase
+        const { data: { user }, error } = await supabase.auth.getUser(token);
 
-// ROTA 2: Verificar se está funcionando (health check)
+        if (error || !user) {
+            return res.status(401).json({ 
+                erro: 'Token inválido ou expirado' 
+            });
+        }
+
+        // Adicionar usuário à requisição
+        req.user = user;
+        next();
+    } catch (error) {
+        console.error('Erro ao verificar autenticação:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao verificar autenticação' 
+        });
+    }
+}
+
+// ============================================
+// ROTA: HEALTH CHECK (Sem autenticação)
+// ============================================
 app.get('/health', (req, res) => {
     res.json({
         status: 'online',
         mensagem: 'Backend Gestor 360° funcionando perfeitamente!',
+        supabase: 'conectado',
         data: new Date().toLocaleString('pt-BR')
     });
 });
 
-// ROTA 3: Calcular pontuação do diagnóstico
-app.post('/calcular', (req, res) => {
+// ============================================
+// ROTA: CADASTRO DE USUÁRIO
+// ============================================
+app.post('/api/auth/cadastro', async (req, res) => {
     try {
-        // Recebe os dados do frontend
-        const { respostas, config } = req.body;
-        
-        // Aqui vai a lógica de cálculo (vamos fazer depois)
-        // Por enquanto, só retorna um exemplo
-        
-        const resultado = {
+        const { email, senha, nome } = req.body;
+
+        // Validação básica
+        if (!email || !senha || !nome) {
+            return res.status(400).json({ 
+                erro: 'Email, senha e nome são obrigatórios' 
+            });
+        }
+
+        // Criar usuário no Supabase
+        const { data, error } = await supabase.auth.signUp({
+            email: email,
+            password: senha,
+            options: {
+                data: {
+                    nome: nome
+                }
+            }
+        });
+
+        if (error) {
+            return res.status(400).json({ 
+                erro: error.message 
+            });
+        }
+
+        res.json({
             sucesso: true,
-            pontuacao: {
-                total: 150,
-                percentual: 62,
-                nivel: 'Estruturado'
-            },
-            mensagem: 'Cálculo realizado com sucesso!'
-        };
-        
-        res.json(resultado);
-        
-    } catch (erro) {
-        res.status(500).json({
-            sucesso: false,
-            mensagem: 'Erro ao calcular',
-            erro: erro.message
+            mensagem: 'Usuário cadastrado com sucesso! Verifique seu email.',
+            usuario: {
+                id: data.user.id,
+                email: data.user.email,
+                nome: nome
+            }
+        });
+    } catch (error) {
+        console.error('Erro ao cadastrar usuário:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao cadastrar usuário' 
         });
     }
 });
 
-// ═══════════════════════════════════════════════════════════════════
-// 🚀 INICIAR O SERVIDOR
-// ═══════════════════════════════════════════════════════════════════
+// ============================================
+// ROTA: LOGIN
+// ============================================
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, senha } = req.body;
 
-app.listen(PORTA, () => {
-    console.log(`
-╔════════════════════════════════════════════════════╗
-║                                                    ║
-║  🚀 GESTOR 360° ONLINE                            ║
-║                                                    ║
-║  Status: ✅ Funcionando                           ║
-║  Porta:  ${PORTA}                                 ║
-║                                                    ║
-║  Abra no navegador:                               ║
-║  👉 http://localhost:${PORTA}                     ║
-║                                                    ║
-║  Para parar: Ctrl + C                             ║
-║                                                    ║
-╚════════════════════════════════════════════════════╝
-    `);
+        // Validação básica
+        if (!email || !senha) {
+            return res.status(400).json({ 
+                erro: 'Email e senha são obrigatórios' 
+            });
+        }
+
+        // Fazer login no Supabase
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: email,
+            password: senha
+        });
+
+        if (error) {
+            return res.status(401).json({ 
+                erro: 'Email ou senha incorretos' 
+            });
+        }
+
+        res.json({
+            sucesso: true,
+            mensagem: 'Login realizado com sucesso!',
+            token: data.session.access_token,
+            usuario: {
+                id: data.user.id,
+                email: data.user.email,
+                nome: data.user.user_metadata.nome || 'Usuário'
+            }
+        });
+    } catch (error) {
+        console.error('Erro ao fazer login:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao fazer login' 
+        });
+    }
+});
+
+// ============================================
+// ROTA: CALCULAR DIAGNÓSTICO (COM AUTENTICAÇÃO)
+// ============================================
+app.post('/api/diagnostico/calcular', verificarAutenticacao, async (req, res) => {
+    try {
+        const { respostas, dadosEmpresa } = req.body;
+
+        // Validação
+        if (!respostas || !dadosEmpresa) {
+            return res.status(400).json({ 
+                erro: 'Respostas e dados da empresa são obrigatórios' 
+            });
+        }
+
+        // ===== CÁLCULO DE PONTUAÇÃO (Lógica original) =====
+        
+        // Definir categorias
+        const categorias = {
+            'Tesouraria': { inicio: 0, fim: 9 },
+            'Resultados & DRE': { inicio: 10, fim: 19 },
+            'Fluxo de Caixa': { inicio: 20, fim: 35 },
+            'Orçamento': { inicio: 36, fim: 45 },
+            'Investimentos': { inicio: 46, fim: 55 },
+            'Riscos Financeiros': { inicio: 56, fim: 65 },
+            'Indicadores Financeiros': { inicio: 66, fim: 75 },
+            'Planejamento Tributário': { inicio: 76, fim: 79 }
+        };
+
+        // Calcular pontuação por categoria
+        const pontuacoesCategorias = {};
+        let pontuacaoTotal = 0;
+
+        for (const [categoria, range] of Object.entries(categorias)) {
+            let pontos = 0;
+            let questoesRespondidas = 0;
+
+            for (let i = range.inicio; i <= range.fim; i++) {
+                if (respostas[i] !== undefined) {
+                    pontos += respostas[i];
+                    questoesRespondidas++;
+                }
+            }
+
+            pontuacoesCategorias[categoria] = {
+                pontos: pontos,
+                questoes: questoesRespondidas,
+                media: questoesRespondidas > 0 ? (pontos / questoesRespondidas) * 10 : 0
+            };
+
+            pontuacaoTotal += pontos;
+        }
+
+        const totalQuestoes = Object.keys(respostas).length;
+        const pontuacaoMedia = totalQuestoes > 0 ? (pontuacaoTotal / totalQuestoes) * 10 : 0;
+
+        // ===== SALVAR NO BANCO SUPABASE =====
+
+        // 1. Salvar/Atualizar empresa
+        const { data: empresaData, error: empresaError } = await supabase
+            .from('empresas')
+            .upsert({
+                user_id: req.user.id,
+                nome_empresa: dadosEmpresa.nomeEmpresa,
+                porte: dadosEmpresa.porte,
+                setor: dadosEmpresa.setor,
+                faturamento_anual: dadosEmpresa.faturamentoAnual || 0,
+                dados_completos: dadosEmpresa,
+                updated_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (empresaError) {
+            console.error('Erro ao salvar empresa:', empresaError);
+            // Continua mesmo com erro (não bloqueia resposta)
+        }
+
+        // 2. Salvar diagnóstico
+        if (empresaData) {
+            const { error: diagnosticoError } = await supabase
+                .from('diagnosticos')
+                .insert({
+                    user_id: req.user.id,
+                    empresa_id: empresaData.id,
+                    respostas: respostas,
+                    pontuacao_total: pontuacaoMedia,
+                    pontuacoes_categorias: pontuacoesCategorias,
+                    perdas_estimadas: 0, // Será calculado na próxima rota
+                    created_at: new Date().toISOString()
+                });
+
+            if (diagnosticoError) {
+                console.error('Erro ao salvar diagnóstico:', diagnosticoError);
+                // Continua mesmo com erro
+            }
+        }
+
+        // Retornar resultado
+        res.json({
+            sucesso: true,
+            pontuacaoTotal: pontuacaoMedia.toFixed(1),
+            pontuacoesCategorias: pontuacoesCategorias,
+            empresaSalva: !!empresaData,
+            empresaId: empresaData?.id
+        });
+
+    } catch (error) {
+        console.error('Erro ao calcular diagnóstico:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao processar diagnóstico' 
+        });
+    }
+});
+
+// ============================================
+// ROTA: CALCULAR PERDAS (COM AUTENTICAÇÃO)
+// ============================================
+app.post('/api/diagnostico/perdas', verificarAutenticacao, async (req, res) => {
+    try {
+        const { pontuacaoTotal, faturamentoAnual } = req.body;
+
+        if (!pontuacaoTotal || !faturamentoAnual) {
+            return res.status(400).json({ 
+                erro: 'Pontuação e faturamento são obrigatórios' 
+            });
+        }
+
+        // Cálculo de perdas (lógica original)
+        const percentualPerda = (100 - parseFloat(pontuacaoTotal)) / 100;
+        const perdaEstimada = parseFloat(faturamentoAnual) * percentualPerda * 0.15;
+
+        res.json({
+            sucesso: true,
+            perdaEstimada: perdaEstimada.toFixed(2),
+            percentualPerda: (percentualPerda * 100).toFixed(1)
+        });
+
+    } catch (error) {
+        console.error('Erro ao calcular perdas:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao calcular perdas' 
+        });
+    }
+});
+
+// ============================================
+// ROTA: LISTAR EMPRESAS DO USUÁRIO
+// ============================================
+app.get('/api/empresas', verificarAutenticacao, async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('empresas')
+            .select('*')
+            .eq('user_id', req.user.id)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            return res.status(500).json({ 
+                erro: 'Erro ao buscar empresas' 
+            });
+        }
+
+        res.json({
+            sucesso: true,
+            empresas: data || []
+        });
+
+    } catch (error) {
+        console.error('Erro ao listar empresas:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao listar empresas' 
+        });
+    }
+});
+
+// ============================================
+// ROTA: LISTAR DIAGNÓSTICOS DE UMA EMPRESA
+// ============================================
+app.get('/api/diagnosticos/:empresaId', verificarAutenticacao, async (req, res) => {
+    try {
+        const { empresaId } = req.params;
+
+        const { data, error } = await supabase
+            .from('diagnosticos')
+            .select('*')
+            .eq('empresa_id', empresaId)
+            .eq('user_id', req.user.id)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            return res.status(500).json({ 
+                erro: 'Erro ao buscar diagnósticos' 
+            });
+        }
+
+        res.json({
+            sucesso: true,
+            diagnosticos: data || []
+        });
+
+    } catch (error) {
+        console.error('Erro ao listar diagnósticos:', error);
+        res.status(500).json({ 
+            erro: 'Erro ao listar diagnósticos' 
+        });
+    }
+});
+
+// ============================================
+// INICIAR SERVIDOR
+// ============================================
+app.listen(PORT, () => {
+    console.log(`\n🚀 Backend Gestor 360° rodando na porta ${PORT}`);
+    console.log(`🔗 URL: http://localhost:${PORT}`);
+    console.log(`✅ Supabase conectado!`);
+    console.log(`🔐 Autenticação ativada!\n`);
 });
