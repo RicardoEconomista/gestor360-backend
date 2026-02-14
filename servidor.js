@@ -1,304 +1,484 @@
-// ============================================
-// GESTOR FINANCEIRO 360° - SERVIDOR BACKEND
-// Versão COMPLETA com Autenticação Supabase
-// ============================================
+// ═══════════════════════════════════════════════════════════════════
+// GESTOR FINANCEIRO 360° - BACKEND COMPLETO E CORRIGIDO
+// ═══════════════════════════════════════════════════════════════════
+// Este é o arquivo servidor.js COMPLETO
+// Copie e cole TUDO no GitHub: gestor360-backend/servidor.js
+// ═══════════════════════════════════════════════════════════════════
 
 const express = require('express');
+const { createClient } = require('@supabase/supabase-js');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ============================================
-// CONFIGURAÇÃO SUPABASE
-// ============================================
+// ═══════════════════════════════════════════════════════════════════
+// CONFIGURAÇÃO
+// ═══════════════════════════════════════════════════════════════════
 
-const SUPABASE_URL = 'https://eggyabjkdgkotkrjjmbg.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVnZ3lhYmprZGdrb3RrcmpqbWJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk4MjMyMDYsImV4cCI6MjA4NTM5OTIwNn0.yJqjB7rMuIlKteRzZBGm1bDtUA8ZlAB29bkD8-s0Qjg';
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Importar Supabase (para Node.js no Vercel)
-const { createClient } = require('@supabase/supabase-js');
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const JWT_SECRET = process.env.JWT_SECRET || 'seu_secret_aqui_mude_em_producao';
 
-// ============================================
-// MIDDLEWARES
-// ============================================
+// ═══════════════════════════════════════════════════════════════════
+// MIDDLEWARE
+// ═══════════════════════════════════════════════════════════════════
 
-// Permitir requisições de qualquer origem (CORS)
-app.use(cors());
+app.use(cors({
+    origin: [
+        'https://gestor360-frontend.vercel.app',
+        'http://localhost:5500',
+        'http://127.0.0.1:5500'
+    ],
+    credentials: true
+}));
 
-// Processar JSON no body das requisições
 app.use(express.json());
 
-// Log de todas as requisições (para debug)
-app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-    next();
-});
-
-// ============================================
-// ROTA 1: HEALTH CHECK
-// ============================================
-// Verifica se o servidor está online
-
-app.get('/health', async (req, res) => {
-    try {
-        // Testar conexão com Supabase
-        const { error } = await supabase.from('usuarios_autorizados').select('count').single();
-        
-        res.json({ 
-            status: 'online',
-            timestamp: new Date().toISOString(),
-            message: 'Servidor funcionando perfeitamente!',
-            supabase: error ? 'erro' : 'conectado'
-        });
-    } catch (erro) {
-        res.json({ 
-            status: 'online',
-            timestamp: new Date().toISOString(),
-            message: 'Servidor online (Supabase não testado)',
-            supabase: 'não testado'
-        });
+// Middleware de verificação de token
+function verificarToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    
+    if (!token) {
+        console.log('❌ Token não fornecido');
+        return res.status(401).json({ error: 'Token não fornecido' });
     }
-});
+    
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (err) {
+            console.log('❌ Token inválido:', err.message);
+            return res.status(403).json({ error: 'Token inválido' });
+        }
+        req.userId = decoded.userId;
+        next();
+    });
+}
 
-// ============================================
-// ROTA 2: VERIFICAR WHITELIST
-// ============================================
-// Verifica se o email está autorizado a criar conta
+// ═══════════════════════════════════════════════════════════════════
+// ROTAS DE AUTENTICAÇÃO
+// ═══════════════════════════════════════════════════════════════════
 
-app.post('/api/auth/verificar-whitelist', async (req, res) => {
+// Registro de usuário
+app.post('/auth/register', async (req, res) => {
+    console.log('📥 POST /auth/register');
+    
     try {
-        console.log('🔍 Verificando whitelist...');
+        const { email, senha, nome } = req.body;
         
-        const { email } = req.body;
-
-        if (!email) {
-            return res.status(400).json({ 
-                erro: 'Email não fornecido' 
-            });
+        if (!email || !senha) {
+            return res.status(400).json({ error: 'Email e senha são obrigatórios' });
         }
-
-        console.log(`📧 Email para verificar: ${email}`);
-
-        // Buscar email na tabela usuarios_autorizados
-        const { data, error } = await supabase
-            .from('usuarios_autorizados')
-            .select('*')
-            .eq('email', email.toLowerCase())
-            .eq('ativo', true)
-            .single();
-
-        if (error || !data) {
-            console.log('❌ Email NÃO autorizado');
-            return res.status(403).json({ 
-                erro: 'Sistema em fase beta. Apenas emails autorizados podem criar conta.' 
-            });
+        
+        // Criar usuário no Supabase Auth
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password: senha
+        });
+        
+        if (authError) {
+            console.error('Erro ao criar usuário:', authError);
+            throw authError;
         }
-
-        console.log('✅ Email autorizado!');
-        res.json({ 
-            autorizado: true,
-            mensagem: 'Email autorizado a criar conta',
-            dados: {
-                nome: data.nome,
-                cargo: data.cargo,
-                empresa: data.empresa
+        
+        console.log('✅ Usuário criado:', authData.user.id);
+        
+        res.status(201).json({ 
+            message: 'Usuário criado com sucesso',
+            user: { 
+                id: authData.user.id, 
+                email: authData.user.email 
             }
         });
-
-    } catch (erro) {
-        console.error('❌ Erro ao verificar whitelist:', erro);
+        
+    } catch (error) {
+        console.error('❌ Erro no registro:', error);
         res.status(500).json({ 
-            erro: 'Erro ao verificar autorização',
-            detalhes: erro.message 
+            error: 'Erro ao criar usuário',
+            details: error.message 
         });
     }
 });
 
-// ============================================
-// ROTA 3: CALCULAR DIAGNÓSTICO (SEM AUTH)
-// ============================================
-// Recebe respostas do diagnóstico e retorna pontuações
-// Esta rota funciona sem autenticação (compatibilidade)
-
-app.post('/calcular', async (req, res) => {
+// Login de usuário
+app.post('/auth/login', async (req, res) => {
+    console.log('📥 POST /auth/login');
+    
     try {
-        console.log('📊 Calculando diagnóstico...');
+        const { email, senha } = req.body;
         
-        // Pega os dados enviados pelo frontend
-        const { respostas, porte, setor } = req.body;
+        if (!email || !senha) {
+            return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+        }
+        
+        // Autenticar com Supabase
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password: senha
+        });
+        
+        if (error) {
+            console.error('Erro no login:', error);
+            throw error;
+        }
+        
+        // Gerar JWT token
+        const token = jwt.sign(
+            { 
+                userId: data.user.id, 
+                email: data.user.email 
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+        
+        console.log('✅ Login bem-sucedido:', data.user.id);
+        
+        res.json({ 
+            token,
+            user: {
+                id: data.user.id,
+                email: data.user.email
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ Erro no login:', error);
+        res.status(401).json({ 
+            error: 'Email ou senha incorretos',
+            details: error.message 
+        });
+    }
+});
 
-        // Validação básica
-        if (!respostas || typeof respostas !== 'object') {
+// ═══════════════════════════════════════════════════════════════════
+// ROTAS DE EMPRESAS
+// ═══════════════════════════════════════════════════════════════════
+
+// Criar empresa
+app.post('/empresas', verificarToken, async (req, res) => {
+    console.log('📥 POST /empresas');
+    console.log('Body recebido:', JSON.stringify(req.body, null, 2));
+    console.log('User ID:', req.userId);
+    
+    try {
+        const { 
+            nome_empresa, 
+            setor, 
+            porte, 
+            faturamento_anual,
+            dados_completos
+        } = req.body;
+        
+        // Validações
+        if (!nome_empresa) {
+            console.error('❌ nome_empresa faltando');
+            return res.status(400).json({ error: 'Nome da empresa é obrigatório' });
+        }
+        
+        if (!setor) {
+            console.error('❌ setor faltando');
+            return res.status(400).json({ error: 'Setor é obrigatório' });
+        }
+        
+        if (!porte) {
+            console.error('❌ porte faltando');
+            return res.status(400).json({ error: 'Porte é obrigatório' });
+        }
+        
+        // Validar porte (deve ser 'Micro' ou 'Pequena')
+        const porteValido = ['Micro', 'Pequena', 'Media'].includes(porte);
+        if (!porteValido) {
+            console.error('❌ porte inválido:', porte);
             return res.status(400).json({ 
-                erro: 'Dados inválidos: respostas não fornecidas' 
+                error: 'Porte deve ser: Micro, Pequena ou Media',
+                porte_recebido: porte
             });
         }
-
-        // ============================================
-        // LÓGICA DE CÁLCULO
-        // ============================================
         
-        // Categorias do diagnóstico
-        const categorias = [
-            'tesouraria',
-            'resultados',
-            'fluxoCaixa',
-            'orcamento',
-            'investimentos',
-            'riscosFinanceiros',
-            'indicadores',
-            'planejamentoTributario'
-        ];
+        console.log('✅ Validações OK');
+        console.log('Inserindo no Supabase...');
+        
+        // Inserir empresa
+        const { data, error } = await supabase
+            .from('empresas')
+            .insert([{
+                nome_empresa,
+                setor,
+                porte,
+                faturamento_anual: faturamento_anual || 0,
+                dados_completos: dados_completos || {},
+                user_id: req.userId,
+                owner_id: req.userId
+            }])
+            .select()
+            .single();
+        
+        if (error) {
+            console.error('❌ Erro do Supabase:', error);
+            throw error;
+        }
+        
+        console.log('✅ Empresa criada com sucesso:', data.id);
+        
+        res.status(201).json({ empresa: data });
+        
+    } catch (error) {
+        console.error('❌ Erro ao criar empresa:', error);
+        res.status(500).json({ 
+            error: 'Erro ao criar empresa',
+            details: error.message,
+            hint: error.hint || null
+        });
+    }
+});
 
-        // Objeto para armazenar pontuações por categoria
-        const pontuacoesCategorias = {};
-        let pontuacaoTotal = 0;
-        let totalPerguntas = 0;
+// Listar empresas
+app.get('/empresas', verificarToken, async (req, res) => {
+    console.log('📥 GET /empresas');
+    console.log('User ID:', req.userId);
+    
+    try {
+        const { data, error } = await supabase
+            .from('empresas')
+            .select('*')
+            .or(`user_id.eq.${req.userId},owner_id.eq.${req.userId}`)
+            .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        
+        console.log(`✅ ${data.length} empresas encontradas`);
+        
+        res.json({ empresas: data });
+        
+    } catch (error) {
+        console.error('❌ Erro ao listar empresas:', error);
+        res.status(500).json({ 
+            error: 'Erro ao listar empresas',
+            details: error.message 
+        });
+    }
+});
 
-        // Calcular pontuação de cada categoria
-        categorias.forEach(categoria => {
-            let pontos = 0;
-            let perguntas = 0;
+// Buscar empresa por ID
+app.get('/empresas/:id', verificarToken, async (req, res) => {
+    console.log('📥 GET /empresas/:id');
+    
+    try {
+        const { id } = req.params;
+        
+        const { data, error } = await supabase
+            .from('empresas')
+            .select('*')
+            .eq('id', id)
+            .single();
+        
+        if (error) throw error;
+        
+        // Verificar se usuário tem acesso
+        if (data.user_id !== req.userId && data.owner_id !== req.userId) {
+            return res.status(403).json({ error: 'Sem permissão para acessar esta empresa' });
+        }
+        
+        console.log('✅ Empresa encontrada:', id);
+        
+        res.json({ empresa: data });
+        
+    } catch (error) {
+        console.error('❌ Erro ao buscar empresa:', error);
+        res.status(500).json({ 
+            error: 'Erro ao buscar empresa',
+            details: error.message 
+        });
+    }
+});
 
-            // Percorrer todas as respostas
-            Object.keys(respostas).forEach(pergunta => {
-                // Se a pergunta pertence a esta categoria
-                if (pergunta.startsWith(categoria)) {
-                    const resposta = parseInt(respostas[pergunta]);
-                    if (!isNaN(resposta)) {
-                        pontos += resposta;
-                        perguntas++;
-                    }
-                }
-            });
+// Atualizar empresa
+app.put('/empresas/:id', verificarToken, async (req, res) => {
+    console.log('📥 PUT /empresas/:id');
+    
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+        
+        // Verificar permissão
+        const { data: empresa } = await supabase
+            .from('empresas')
+            .select('user_id, owner_id')
+            .eq('id', id)
+            .single();
+        
+        if (!empresa || (empresa.user_id !== req.userId && empresa.owner_id !== req.userId)) {
+            return res.status(403).json({ error: 'Sem permissão' });
+        }
+        
+        // Atualizar
+        const { data, error } = await supabase
+            .from('empresas')
+            .update(updates)
+            .eq('id', id)
+            .select()
+            .single();
+        
+        if (error) throw error;
+        
+        console.log('✅ Empresa atualizada:', id);
+        
+        res.json({ empresa: data });
+        
+    } catch (error) {
+        console.error('❌ Erro ao atualizar empresa:', error);
+        res.status(500).json({ 
+            error: 'Erro ao atualizar empresa',
+            details: error.message 
+        });
+    }
+});
 
-            // Calcular média da categoria (0-100)
-            const media = perguntas > 0 ? (pontos / perguntas) * 20 : 0;
-            pontuacoesCategorias[categoria] = Math.round(media * 10) / 10;
+// Deletar empresa
+app.delete('/empresas/:id', verificarToken, async (req, res) => {
+    console.log('📥 DELETE /empresas/:id');
+    
+    try {
+        const { id } = req.params;
+        
+        // Verificar se é owner
+        const { data: empresa } = await supabase
+            .from('empresas')
+            .select('owner_id')
+            .eq('id', id)
+            .single();
+        
+        if (!empresa || empresa.owner_id !== req.userId) {
+            return res.status(403).json({ error: 'Apenas o owner pode deletar' });
+        }
+        
+        // Deletar
+        const { error } = await supabase
+            .from('empresas')
+            .delete()
+            .eq('id', id);
+        
+        if (error) throw error;
+        
+        console.log('✅ Empresa deletada:', id);
+        
+        res.json({ message: 'Empresa deletada com sucesso' });
+        
+    } catch (error) {
+        console.error('❌ Erro ao deletar empresa:', error);
+        res.status(500).json({ 
+            error: 'Erro ao deletar empresa',
+            details: error.message 
+        });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ROTAS DE DIAGNÓSTICOS
+// ═══════════════════════════════════════════════════════════════════
+
+// Salvar diagnóstico
+app.post('/diagnosticos', verificarToken, async (req, res) => {
+    console.log('📥 POST /diagnosticos');
+    
+    try {
+        const { empresa_id, scores, respostas, completo } = req.body;
+        
+        // Inserir diagnóstico
+        const { data: diagnostico, error: erroDiag } = await supabase
+            .from('diagnosticos')
+            .insert([{
+                empresa_id,
+                user_id: req.userId,
+                score_geral: scores?.geral || 0,
+                score_tesouraria: scores?.tesouraria || 0,
+                score_resultados: scores?.resultados || 0,
+                score_fluxo: scores?.fluxo || 0,
+                score_orcamento: scores?.orcamento || 0,
+                score_investimentos: scores?.investimentos || 0,
+                score_riscos: scores?.riscos || 0,
+                score_indicadores: scores?.indicadores || 0,
+                score_tributario: scores?.tributario || 0,
+                completo: completo || false
+            }])
+            .select()
+            .single();
+        
+        if (erroDiag) throw erroDiag;
+        
+        // Inserir respostas
+        if (respostas && respostas.length > 0) {
+            const respostasComDiagnostico = respostas.map(r => ({
+                ...r,
+                diagnostico_id: diagnostico.id
+            }));
             
-            pontuacaoTotal += media;
-            totalPerguntas += perguntas;
-        });
-
-        // Calcular média geral
-        const mediaGeral = Math.round((pontuacaoTotal / categorias.length) * 10) / 10;
-
-        // ============================================
-        // RETORNAR RESULTADO
-        // ============================================
-        
-        const resultado = {
-            pontuacaoTotal: mediaGeral,
-            pontuacoesCategorias: pontuacoesCategorias,
-            totalPerguntas: totalPerguntas,
-            porte: porte,
-            setor: setor,
-            timestamp: new Date().toISOString()
-        };
-
-        console.log('✅ Diagnóstico calculado com sucesso!');
-        console.log(`   Pontuação total: ${mediaGeral}%`);
-        
-        res.json(resultado);
-
-    } catch (erro) {
-        console.error('❌ Erro ao calcular diagnóstico:', erro);
-        res.status(500).json({ 
-            erro: 'Erro ao processar diagnóstico',
-            detalhes: erro.message 
-        });
-    }
-});
-
-// ============================================
-// ROTA 4: CALCULAR PERDAS ESTIMADAS (SEM AUTH)
-// ============================================
-// Estima perdas financeiras baseado na pontuação
-
-app.post('/perdas', async (req, res) => {
-    try {
-        console.log('💰 Calculando perdas estimadas...');
-        
-        const { pontuacao, faturamento } = req.body;
-
-        // Validação
-        if (!pontuacao || !faturamento) {
-            return res.status(400).json({ 
-                erro: 'Dados inválidos: pontuacao e faturamento são obrigatórios' 
-            });
+            const { error: erroResp } = await supabase
+                .from('respostas_diagnostico')
+                .insert(respostasComDiagnostico);
+            
+            if (erroResp) throw erroResp;
         }
-
-        // ============================================
-        // LÓGICA DE CÁLCULO DE PERDAS
-        // ============================================
         
-        // Quanto MENOR a pontuação, MAIOR a perda
-        // Pontuação 100% = 0% de perda
-        // Pontuação 0% = 20% de perda
+        console.log('✅ Diagnóstico salvo:', diagnostico.id);
         
-        const percentualPerda = (100 - parseFloat(pontuacao)) * 0.2;
-        const valorFaturamento = parseFloat(faturamento);
-        const perdaEstimada = (valorFaturamento * percentualPerda) / 100;
-
-        const resultado = {
-            faturamentoAnual: valorFaturamento,
-            pontuacaoDiagnostico: parseFloat(pontuacao),
-            percentualPerda: Math.round(percentualPerda * 10) / 10,
-            perdaEstimada: Math.round(perdaEstimada * 100) / 100,
-            timestamp: new Date().toISOString()
-        };
-
-        console.log('✅ Perdas calculadas com sucesso!');
-        console.log(`   Perda estimada: R$ ${resultado.perdaEstimada.toLocaleString('pt-BR')}`);
+        res.status(201).json({ diagnostico });
         
-        res.json(resultado);
-
-    } catch (erro) {
-        console.error('❌ Erro ao calcular perdas:', erro);
+    } catch (error) {
+        console.error('❌ Erro ao salvar diagnóstico:', error);
         res.status(500).json({ 
-            erro: 'Erro ao calcular perdas',
-            detalhes: erro.message 
+            error: 'Erro ao salvar diagnóstico',
+            details: error.message 
         });
     }
 });
 
-// ============================================
-// ROTA 404: Rota não encontrada
-// ============================================
-
-app.use((req, res) => {
-    res.status(404).json({ 
-        erro: 'Rota não encontrada',
-        rota: req.path,
-        metodo: req.method
-    });
+// Buscar diagnósticos
+app.get('/diagnosticos/:empresa_id', verificarToken, async (req, res) => {
+    console.log('📥 GET /diagnosticos/:empresa_id');
+    
+    try {
+        const { empresa_id } = req.params;
+        
+        const { data, error } = await supabase
+            .from('diagnosticos')
+            .select('*')
+            .eq('empresa_id', empresa_id)
+            .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        
+        console.log(`✅ ${data.length} diagnósticos encontrados`);
+        
+        res.json({ diagnosticos: data });
+        
+    } catch (error) {
+        console.error('❌ Erro ao buscar diagnósticos:', error);
+        res.status(500).json({ 
+            error: 'Erro ao buscar diagnósticos',
+            details: error.message 
+        });
+    }
 });
 
-// ============================================
-// INICIAR SERVIDOR
-// ============================================
+// ═══════════════════════════════════════════════════════════════════
+// SERVIDOR
+// ═══════════════════════════════════════════════════════════════════
 
 app.listen(PORT, () => {
-    console.log('');
-    console.log('🚀 ================================');
-    console.log('🚀 GESTOR FINANCEIRO 360°');
-    console.log('🚀 Servidor Backend ONLINE!');
-    console.log('🚀 ================================');
-    console.log(`🚀 Porta: ${PORT}`);
-    console.log(`🚀 Supabase: ${SUPABASE_URL}`);
-    console.log(`🚀 Rotas disponíveis:`);
-    console.log(`🚀   GET  /health`);
-    console.log(`🚀   POST /calcular`);
-    console.log(`🚀   POST /perdas`);
-    console.log(`🚀   POST /api/auth/verificar-whitelist`);
-    console.log('🚀 ================================');
+    console.log('╔════════════════════════════════════════════╗');
+    console.log('║   GESTOR FINANCEIRO 360° - BACKEND         ║');
+    console.log('╚════════════════════════════════════════════╝');
+    console.log(`✅ Servidor rodando na porta ${PORT}`);
+    console.log(`🌐 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📡 CORS habilitado para: gestor360-frontend.vercel.app`);
     console.log('');
 });
 
-// ============================================
-// EXPORT (para Vercel)
-// ============================================
-
+// Export para Vercel
 module.exports = app;
