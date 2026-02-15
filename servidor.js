@@ -469,7 +469,10 @@ app.get('/diagnosticos/:empresa_id', verificarToken, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // SERVIDOR
 // ═══════════════════════════════════════════════════════════════════
-
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', message: 'Backend funcionando!' });
+});
 app.listen(PORT, () => {
     console.log('╔════════════════════════════════════════════╗');
     console.log('║   GESTOR FINANCEIRO 360° - BACKEND         ║');
