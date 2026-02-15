@@ -1,8 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════
 // GESTOR FINANCEIRO 360° - BACKEND COMPLETO E CORRIGIDO
 // ═══════════════════════════════════════════════════════════════════
-// Este é o arquivo servidor.js COMPLETO
-// Copie e cole TUDO no GitHub: gestor360-backend/servidor.js
+// INSTRUÇÕES:
+// 1. GitHub: https://github.com/RicardoEconomista/gestor360-backend
+// 2. Clica em: servidor.js
+// 3. Clica no lápis (Edit)
+// 4. CTRL+A (seleciona tudo)
+// 5. DELETE (apaga tudo)
+// 6. COPIA TODO ESTE ARQUIVO
+// 7. COLA no GitHub
+// 8. Commit: "fix: servidor completo corrigido com CORS e health"
 // ═══════════════════════════════════════════════════════════════════
 
 const express = require('express');
@@ -28,13 +35,18 @@ const JWT_SECRET = process.env.JWT_SECRET || 'seu_secret_aqui_mude_em_producao';
 // MIDDLEWARE
 // ═══════════════════════════════════════════════════════════════════
 
+// CORS - CORRIGIDO!
 app.use(cors({
     origin: [
         'https://gestor360-frontend.vercel.app',
         'http://localhost:5500',
-        'http://127.0.0.1:5500'
+        'http://127.0.0.1:5500',
+        'https://gestor360-frontend-git-main-ricardo16.vercel.app',
+        'https://gestor360-frontend-jt2p4alno-ricardo16.vercel.app'
     ],
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
@@ -188,16 +200,6 @@ app.post('/empresas', verificarToken, async (req, res) => {
         if (!porte) {
             console.error('❌ porte faltando');
             return res.status(400).json({ error: 'Porte é obrigatório' });
-        }
-        
-        // Validar porte (deve ser 'Micro' ou 'Pequena')
-        const porteValido = ['Micro', 'Pequena', 'Media'].includes(porte);
-        if (!porteValido) {
-            console.error('❌ porte inválido:', porte);
-            return res.status(400).json({ 
-                error: 'Porte deve ser: Micro, Pequena ou Media',
-                porte_recebido: porte
-            });
         }
         
         console.log('✅ Validações OK');
@@ -467,12 +469,21 @@ app.get('/diagnosticos/:empresa_id', verificarToken, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// HEALTH CHECK
+// ═══════════════════════════════════════════════════════════════════
+
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        message: 'Backend funcionando!',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // SERVIDOR
 // ═══════════════════════════════════════════════════════════════════
-// Health check
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'Backend funcionando!' });
-});
+
 app.listen(PORT, () => {
     console.log('╔════════════════════════════════════════════╗');
     console.log('║   GESTOR FINANCEIRO 360° - BACKEND         ║');
